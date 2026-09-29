@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const crypto=require('node:crypto');
 const {DatabaseSync}=require('node:sqlite');
-const ROOT=__dirname,DATA=path.join(ROOT,'data'),UPLOADS=path.join(DATA,'uploads');
+const ROOT=__dirname,DATA=process.env.DATA_DIR||path.join(ROOT,'data'),UPLOADS=path.join(DATA,'uploads');
 for(const dir of [DATA,UPLOADS])fs.mkdirSync(dir,{recursive:true});
 const ADMIN_PASSWORD=process.env.ADMIN_PASSWORD;
 if(!ADMIN_PASSWORD||ADMIN_PASSWORD.length<12){console.error('Set ADMIN_PASSWORD to a unique password of at least 12 characters before starting.');process.exit(1)}
@@ -43,7 +43,7 @@ function app(req,res){
  if(url.pathname.startsWith('/api/admin/')){
   if(!requireAdmin(req,res))return;
   if(url.pathname==='/api/admin/applications'&&req.method==='GET'){json(res,200,applications());return}
-  const fileMatch=url.pathname.match(/^\/api\/admin\/files\/([a-f0-9-]+)\/(photo|document)$/);
+  const fileMatch=url.pathname.match(/^\/api\/admin\/files\/([A-Z0-9-]+)\/(photo|document)$/);
   if(fileMatch&&req.method==='GET'){const rec=db.prepare('SELECT photo,document FROM applications WHERE id=?').get(fileMatch[1]);const f=rec&&rec[fileMatch[2]]?JSON.parse(rec[fileMatch[2]]):null;if(!f){json(res,404,{error:'File not found.'});return}try{const bytes=fs.readFileSync(path.join(UPLOADS,path.basename(f.stored)));send(res,200,bytes,{'Content-Type':f.mime,'Content-Disposition':`inline; filename="${f.name.replace(/["\\]/g,'_')}"`,'X-Content-Type-Options':'nosniff'})}catch{json(res,404,{error:'File not found.'})}return}
   const idMatch=url.pathname.match(/^\/api\/admin\/applications\/([A-Z0-9-]+)$/);
   if(idMatch&&req.method==='PATCH'){if(!checkOrigin(req)){json(res,403,{error:'Request origin was rejected.'});return}body(req,128*1024).then(buf=>{const val=JSON.parse(buf.toString()),r=db.prepare('SELECT * FROM applications WHERE id=?').get(idMatch[1]);if(!r){json(res,404,{error:'Application not found.'});return}if(val.status&&!['New','Approved','Rejected'].includes(val.status)){json(res,400,{error:'Invalid status.'});return}const data=val.data&&typeof val.data==='object'?val.data:JSON.parse(r.data);db.prepare('UPDATE applications SET data=?,status=? WHERE id=?').run(JSON.stringify(data),val.status||r.status,idMatch[1]);json(res,200,{ok:true})}).catch(()=>json(res,400,{error:'Invalid update.'}));return}
@@ -52,5 +52,9 @@ function app(req,res){
  json(res,404,{error:'Not found.'});
 }
 const server=http.createServer((req,res)=>{Promise.resolve(app(req,res)).catch(err=>{console.error(err);if(!res.headersSent)json(res,500,{error:'An unexpected server error occurred.'})})});
-server.listen(Number(process.env.PORT)||3000,process.env.HOST||'127.0.0.1',()=>console.log(`Jamia admissions app is running at http://${process.env.HOST||'127.0.0.1'}:${Number(process.env.PORT)||3000}`));
+const PORT=Number(process.env.PORT)||3000,HOST=process.env.HOST||(process.env.PORT?'0.0.0.0':'127.0.0.1');server.listen(PORT,HOST,()=>console.log(`Jamia admissions app is running at http://${HOST}:${PORT}`));
+
+
+
+
 
