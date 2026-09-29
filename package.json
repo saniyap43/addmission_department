@@ -1,0 +1,8 @@
+{
+  "name": "jamia-tul-banat-admissions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Admissions portal for Jamia tul Banat Faizan e Ummul Khair Foundation",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=24" }
+}
