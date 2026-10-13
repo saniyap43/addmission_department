@@ -1,37 +1,73 @@
-# Jamia tul Banat Admissions App
+# Jamia tul Banat Admissions and Student Results
 
-A full-stack admissions application for Jamia tul Banat Faizan e Ummul Khair Foundation. Applications and uploaded documents are stored on the server using SQLite and a private uploads folder. Staff use a password-protected portal to review, edit, approve/reject, print, delete, and export applications.
+This existing project serves the admission website at `/` and the student results portal at `/results/`. The admission site keeps its existing pages and styling. Admission applications and their photo/identity uploads are stored in Neon PostgreSQL through the Node.js server. Staff records are only available after signing in.
 
-## Requirements
+## Architecture and persistence
 
-- Node.js 24 or newer (the app uses Node's built-in SQLite module; no npm packages are required)
+- Admission pages: `index.html`, `style.css`, and `script.js`.
+- Admission API and staff session: `server.js`.
+- Neon connection and non-destructive schema setup: `admissions-db.js`.
+- Existing results portal: `results/` (it continues to use its existing SQLite database and is not migrated by the admissions migration).
+- Legacy admissions data migration: `scripts/migrate-admissions-sqlite.js`.
 
-## Run locally on Windows
+The existing local admissions database was inspected before implementation: it had zero application rows. The migration script is still included for a repeat-safe copy if records appear in a backup later. It never deletes the source SQLite file or uploads.
 
-Double-click `Open Admission App.bat`. It asks you to choose a staff password, starts the Node.js server, and opens the site in your browser. Keep the Node.js server window open while using the app; close that window to stop it.
+## Create Neon database
 
-## Run manually in PowerShell
+1. Create a project at [Neon](https://neon.tech/).
+2. In the Neon project, open **Dashboard** and copy the PostgreSQL connection string. Use the pooled connection string if Neon offers it; keep the SSL option enabled.
+3. Keep that string private. Do not put it in frontend files, screenshots, GitHub, or messages.
+4. The application creates `admission_applications` and its indexes on startup with `CREATE TABLE IF NOT EXISTS`; it does not clear or recreate existing data.
 
-1. Open PowerShell in this folder.
-2. Set a strong staff password for this run:
+## Run locally
 
-   ```powershell
-   $env:ADMIN_PASSWORD = Read-Host "Choose a staff password (12+ characters)"
-   ```
+Use Node.js 24 or newer and PowerShell from this project folder:
 
-3. Start the server:
+```powershell
+npm install
+$env:DATABASE_URL = Read-Host "Paste the Neon connection string"
+$env:ADMIN_USERNAME = "admissions"
+$env:ADMIN_PASSWORD = Read-Host "Choose a unique staff password (12+ characters)"
+npm start
+```
 
-   ```powershell
-   npm start
-   ```
+Open `http://127.0.0.1:3000/`. The admission Staff Portal is in the top navigation. The results portal is at `http://127.0.0.1:3000/results/`; its admin username defaults to `maimuna01` in the existing results application. Use `ADMIN_USERNAME=maimuna01` if you want the same username in both areas; the password environment variable is shared by the current combined server.
 
-4. Open `http://127.0.0.1:3000` in the browser.
-5. Select **Staff Portal** and sign in with the password you entered.
+At startup, the server logs connection success and confirms that `public.admission_applications` and its indexes are ready. On Render, open **Logs** and check for `Database: admission_applications table and indexes are ready.` The health endpoint `http://127.0.0.1:3000/api/health` should return `{"ok":true,"storage":"postgresql","table":"ready"}`. If initialization fails, startup stops and logs a database error code and safe setup guidance; the connection string is never logged.
 
-The server saves the database at `data/admissions.sqlite` and uploaded files under `data/uploads/`. Back up the complete `data` folder. Do not place that folder in a public web directory or share it; it contains student personal information and identity documents.
+You can verify the table in Neon’s SQL Editor:
 
-## Important before public deployment
+```sql
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;
+```
 
-This app is prepared to run as a server but is not deployed to a public domain. Public access requires a hosting provider, HTTPS, secure server configuration, backups, and appropriate privacy/data-retention practices for student records and identity documents. Never use the built-in server directly as a public production server. The WhatsApp link prepares a message for the applicant to send; it does not automatically message the admissions number.
+The admissions schema is initialized by the deployed Node server at startup, not by manually running a SQL script. If this query is empty, first confirm Render deployed the commit containing `admissions-db.js` and the updated `server.js`, then inspect the startup logs for the database connection or schema error.
 
+## Render deployment
 
+1. Push the code to the Git branch connected to the Render web service.
+2. In Render, open the service's **Settings** and use **Build Command** `npm install` and **Start Command** `npm start`.
+3. Open **Environment** and add `DATABASE_URL` with the Neon connection string, `ADMIN_USERNAME` (at least 3 characters), `ADMIN_PASSWORD` (unique, at least 12 characters), and `NODE_ENV=production`.
+4. Save changes and deploy. Render provides `PORT`; the server binds to `0.0.0.0` when deployed.
+5. Check `/api/health`, submit a test application, sign in to Staff Portal, and confirm it appears. Redeploy and verify that it remains. Delete only the test application after confirming persistence.
+
+Render's filesystem is not the primary store for admissions submissions. The application table and uploaded files are kept in PostgreSQL. Staff-only APIs check the session server-side, use parameterized queries, and require same-origin requests for changes. Never share Aadhaar images or secrets in support messages.
+
+## Migrating old admissions SQLite rows
+
+Before migration, make a private copy of `data/admissions.sqlite` and `data/uploads`. Set `DATABASE_URL` in the environment, then run:
+
+```powershell
+npm run migrate:admissions
+```
+
+The script copies each application and its uploads in a transaction, skips application numbers already present in Neon, and leaves the original SQLite database and files untouched. Verify the import in Neon before archiving the local copy. Do not run an import if you are unsure which database copy is authoritative.
+
+## Backups and limits
+
+Database persistence is not a backup. Use Neon’s backup/restore features available for your plan and periodically export important records to a private, access-controlled location. Verify that a backup can be restored. Avoid storing Aadhaar details unless the Madrasa needs them; restrict access and retain sensitive documents only as long as required.
+
+The student results portal still uses its original local SQLite database in this project. Its records are therefore not made persistent on Render by this admissions change. They need a separate migration to PostgreSQL or persistent storage before relying on Render for long-term results data.
